@@ -1,0 +1,139 @@
+cabal-version: 3.0
+name: circuits-meter-observe
+version: 0.1.0.0
+license: BSD-3-Clause
+author: Tony Day
+maintainer: tonyday567@gmail.com
+category: performance
+synopsis: Machina observation — pipeline metering and performance showcases
+description:
+  The observe package for circuits-meter. Provides pipeline-level
+  metering (Stopwatch markers), benchmark executables that demonstrate
+  the machina pattern, and integration with chart-svg for live charting.
+
+build-type: Simple
+
+source-repository head
+  type: git
+  location: https://github.com/tonyday567/circuits-meter-observe.git
+
+executable perf-bench
+  main-is: Main.hs
+  hs-source-dirs: app
+  build-depends:
+    base >=4.20 && <5,
+    circuits >=0.1 && <0.4,
+    circuits-meter,
+    optparse-applicative >=0.18 && <0.20,
+
+  default-language: GHC2024
+  ghc-options:
+    -Wall
+    -Wcompat
+    -rtsopts
+
+executable observe
+  main-is: Observe.hs
+  hs-source-dirs: app
+  build-depends:
+    base >=4.20 && <5,
+    circuits >=0.1 && <0.4,
+    circuits-meter,
+    containers >=0.6 && <0.9,
+
+  default-language: GHC2024
+  ghc-options:
+    -Wall
+    -Wcompat
+    -rtsopts
+
+executable nub
+  main-is: Nub.hs
+  hs-source-dirs: examples
+  build-depends:
+    base >=4.20 && <5,
+    circuits-meter,
+    containers >=0.6 && <0.9,
+    optparse-applicative >=0.18 && <0.20,
+
+  default-language: GHC2024
+  ghc-options:
+    -Wall
+    -Wcompat
+    -rtsopts
+
+executable probe
+  main-is: Probe.hs
+  hs-source-dirs: app
+  build-depends:
+    base >=4.20 && <5,
+    circuits >=0.1 && <0.4,
+    circuits-meter,
+    containers >=0.6 && <0.9,
+    deepseq >=1.4 && <1.6,
+    optparse-applicative >=0.18 && <0.20,
+    temporary >=1.3 && <1.5,
+
+  default-language: GHC2024
+  ghc-options:
+    -Wall
+    -Wcompat
+    -rtsopts
+
+executable laziness
+  main-is: Laziness.hs
+  hs-source-dirs: app
+  build-depends:
+    base >=4.20 && <5,
+    circuits >=0.1 && <0.4,
+    circuits-meter,
+    containers >=0.6 && <0.9,
+    deepseq >=1.4 && <1.6,
+
+  default-language: GHC2024
+  ghc-options:
+    -Wall
+    -Wcompat
+    -rtsopts
+
+executable alloc-probe
+  main-is: AllocProbe.hs
+  hs-source-dirs: app
+  build-depends:
+    base >=4.20 && <5,
+    circuits-meter,
+
+  default-language: GHC2024
+  ghc-options:
+    -Wall
+    -Wcompat
+    -rtsopts
+
+executable alloc-thunk
+  main-is: AllocThunk.hs
+  hs-source-dirs: app
+  build-depends:
+    base >=4.20 && <5,
+    circuits >=0.1 && <0.4,
+    circuits-meter,
+    deepseq >=1.4 && <1.6,
+
+  default-language: GHC2024
+  ghc-options:
+    -Wall
+    -Wcompat
+    -rtsopts
+
+executable stress
+  main-is: Stress.hs
+  hs-source-dirs: app
+  build-depends:
+    base >=4.20 && <5,
+    circuits >=0.1 && <0.4,
+    circuits-meter,
+
+  default-language: GHC2024
+  ghc-options:
+    -Wall
+    -Wcompat
+    -rtsopts
