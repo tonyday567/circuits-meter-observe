@@ -1,5 +1,5 @@
 cabal-version: 3.0
-name: circuits-meter-observe
+name: circuits-meter-machina
 version: 0.1.0.0
 license: BSD-3-Clause
 author: Tony Day
@@ -15,7 +15,7 @@ build-type: Simple
 
 source-repository head
   type: git
-  location: https://github.com/tonyday567/circuits-meter-observe.git
+  location: https://github.com/tonyday567/circuits-meter-machina.git
 
 executable perf-bench
   main-is: Main.hs
@@ -32,8 +32,8 @@ executable perf-bench
     -Wcompat
     -rtsopts
 
-executable observe
-  main-is: Observe.hs
+executable circuits-meter-machina
+  main-is: Machina.hs
   hs-source-dirs: app
   build-depends:
     base >=4.20 && <5,
