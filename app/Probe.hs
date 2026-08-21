@@ -8,7 +8,7 @@ module Main where
 
 import Circuit.Category (Category (..), (.>))
 import Circuit.Channel (trace)
-import Circuit.Ends (Ends (..), HasUnit (..), In (..), Out (..), close, companion, conjoint, emit)
+import Circuit.Ends (Ends (..), HasDual (..), In (..), Out (..), close)
 import Circuit.Hyper (HyperF, pattern Hyper, invoke, lift, liftArr, observe, observeArr, push, pushArr, base, baseArr, runHyper)
 import Circuit.Layer (run)
 import Circuit.Loop (Loop (..))
