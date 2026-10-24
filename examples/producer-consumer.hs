@@ -1,27 +1,26 @@
 {-# LANGUAGE GADTs #-}
 
--- | Producer-consumer: open, read, close as explicit Loop stages.
+-- | Producer-consumer: open, read, close as explicit FreeTrace stages.
 module Main where
 
 import Circuit
-import Circuit.Category ((.>))
-import Control.Arrow (Kleisli (..), runKleisli)
+import Circuit.Category (K (..), (.>))
 import Data.Bool (bool)
 import System.IO (Handle, IOMode (ReadMode), hClose, hGetLine, hIsEOF, openFile)
 
 -- | Domain primitives #################################################
-openf :: Loop t (Kleisli IO) FilePath Handle
-openf = Lift (Kleisli (`openFile` ReadMode))
+openf :: FreeTrace t (K IO) FilePath Handle
+openf = Lift (K (`openFile` ReadMode))
 
-getLine :: Loop t (Kleisli IO) Handle String
-getLine = Lift (Kleisli hGetLine)
+getLine :: FreeTrace t (K IO) Handle String
+getLine = Lift (K hGetLine)
 
-closef :: Loop t (Kleisli IO) Handle ()
-closef = Lift (Kleisli hClose)
+closef :: FreeTrace t (K IO) Handle ()
+closef = Lift (K hClose)
 
 -- | Iteration via Either feedback ####################################
-readAll :: Loop Either (Kleisli IO) Handle (Handle, [String])
-readAll = Knot (Kleisli step)
+readAll :: FreeTrace Either (K IO) Handle (Handle, [String])
+readAll = trace (Lift (K step))
   where
     step (Left (h, acc)) =
       hIsEOF h
@@ -32,11 +31,11 @@ readAll = Knot (Kleisli step)
       pure (Left (h, []))
 
 -- | Pipeline: open → read → close → display ##########################
-pipeline :: Loop Either (Kleisli IO) FilePath ()
+pipeline :: FreeTrace Either (K IO) FilePath ()
 pipeline =
   openf
     .> readAll
-    .> Lift (Kleisli (\(h, acc) -> hClose h >> putStrLn ("read " <> show (length acc) <> " lines")))
+    .> Lift (K (\(h, acc) -> hClose h >> putStrLn ("read " <> show (length acc) <> " lines")))
 
 main :: IO ()
-main = runKleisli (run pipeline) "other/alice.md"
+main = runK (eval pipeline) "other/alice.md"

@@ -1,1 +1,1 @@
-packages: . ../../haskell/circuits-meter ../../haskell/circuits
+packages: . ../../haskell/circuits-meter ../../haskell/circuits ../../haskell/circuits-rel

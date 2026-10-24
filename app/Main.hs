@@ -16,11 +16,11 @@
 --   perf-bench --runs 100000 --warmup 1000
 module Main where
 
+import Circuit.Category (K (..))
 import Circuit.Meter
 import Circuit.Meter.Space
 import Circuit.Meter.Time
-import Circuit.Channel (trace)
-import Control.Arrow hiding (loop)
+import Circuit.Traced (trace)
 import Data.IORef
 import Data.List qualified as List
 import GHC.Stats
@@ -83,7 +83,7 @@ report name xs = do
 benchClock :: Config -> IO [Nanos]
 benchClock cfg = do
   let n = cfgRuns cfg
-  (ts, _) <- runKleisli (timesK 0 n timeX (Kleisli (\() -> pure ()))) ()
+  (ts, _) <- runK (timesK 0 n timeX (K (\() -> pure ()))) ()
   pure ts
 
 -- ---------------------------------------------------------------------------
@@ -105,15 +105,15 @@ benchWhileM :: Config -> IO [Nanos]
 benchWhileM cfg = do
   let target = cfgTraceTarget cfg
       n = cfgRuns cfg
-  (ts, _) <- runKleisli (timesK 0 n timeX (Kleisli (\() -> countIORef target))) ()
+  (ts, _) <- runK (timesK 0 n timeX (K (\() -> countIORef target))) ()
   pure ts
 
 -- ---------------------------------------------------------------------------
 -- Benchmark 3: delimited continuation trace
 -- ---------------------------------------------------------------------------
 
-countTrace :: Int -> Kleisli IO (Either Int ()) (Either Int Int)
-countTrace target = Kleisli \case
+countTrace :: Int -> K IO (Either Int ()) (Either Int Int)
+countTrace target = K \case
   Right () -> countUp 0
   Left n -> countUp n
   where
@@ -123,14 +123,14 @@ countTrace target = Kleisli \case
 {-# NOINLINE countTrace #-}
 
 runTrace :: Int -> IO Int
-runTrace n = runKleisli (trace (countTrace n)) ()
+runTrace n = runK (trace (countTrace n)) ()
 {-# NOINLINE runTrace #-}
 
 benchTrace :: Config -> IO [Nanos]
 benchTrace cfg = do
   let target = cfgTraceTarget cfg
       n = cfgRuns cfg
-  (ts, _) <- runKleisli (timesK 0 n timeX (Kleisli (\() -> runTrace target))) ()
+  (ts, _) <- runK (timesK 0 n timeX (K (\() -> runTrace target))) ()
   pure ts
 
 -- ---------------------------------------------------------------------------
@@ -143,8 +143,8 @@ benchMeterK :: Config -> IO [Nanos]
 benchMeterK cfg = do
   let target = cfgTraceTarget cfg
       n = cfgRuns cfg
-      kaction = Kleisli (\() -> runTrace target)
-  (ts, _r) <- runKleisli (timesK 0 n timeX kaction) ()
+      kaction = K (\() -> runTrace target)
+  (ts, _r) <- runK (timesK 0 n timeX kaction) ()
   pure ts
 
 -- ---------------------------------------------------------------------------
@@ -159,8 +159,8 @@ benchBoth cfg = do
     else do
       let target = cfgTraceTarget cfg
           meterBoth = both timeX allocX
-          kaction = Kleisli (\() -> runTrace target)
-      ((dt, alloc), _r) <- runKleisli (reifyC (meterAction meterBoth kaction)) ()
+          kaction = K (\() -> runTrace target)
+      ((dt, alloc), _r) <- runK (reifyC (meterAction meterBoth kaction)) ()
       putStrLn $
         "time+space: time="
           <> fmt dt

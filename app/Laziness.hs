@@ -9,20 +9,19 @@
 -- Run: cabal run laziness
 module Main where
 
-import Circuit.Category ((.>))
-import Circuit.Layer (run)
-import Circuit.Loop (Loop)
+import Circuit.Category (K (..), (.>))
 import Circuit.Meter (Meter (..), both)
 import Circuit.Meter.Space (Bytes (..), allocGC)
 import Circuit.Meter.Stopwatch qualified as SW
 import Circuit.Meter.Time (Nanos, timeX)
-import Control.Arrow (Kleisli (..), runKleisli)
+import Circuit.Syntax (eval)
+import Circuit.Trace (FreeTrace)
 import Control.DeepSeq (force)
 import Control.Exception (evaluate)
 import Data.List qualified as List
 import Data.Map.Strict qualified as Map
-import Prelude
 import Text.Printf (printf)
+import Prelude
 
 n :: Int
 n = 100000
@@ -49,29 +48,31 @@ total = foldr (+) 0
 {-# NOINLINE total #-}
 
 -- Meter that carries both time and allocation (GC-forced accuracy).
-timeSpace :: Meter (Kleisli IO) (Nanos, Bytes) (Nanos, Bytes)
+timeSpace :: Meter (K IO) (Nanos, Bytes) (Nanos, Bytes)
 timeSpace = both timeX allocGC
 
 fmtTime :: Nanos -> String
 fmtTime t
-  | t < 1000    = show t ++ " ns"
+  | t < 1000 = show t ++ " ns"
   | t < 1000000 = printf "%.1f µs" (fromIntegral t / 1e3 :: Double)
-  | otherwise   = printf "%.1f ms" (fromIntegral t / 1e6 :: Double)
+  | otherwise = printf "%.1f ms" (fromIntegral t / 1e6 :: Double)
 
 fmtBytes :: Bytes -> String
 fmtBytes (Bytes b)
-  | b < 1024   = show b ++ " B"
+  | b < 1024 = show b ++ " B"
   | b < 1048576 = printf "%.1f KB" (fromIntegral b / 1024 :: Double)
-  | otherwise   = printf "%.1f MB" (fromIntegral b / 1048576 :: Double)
+  | otherwise = printf "%.1f MB" (fromIntegral b / 1048576 :: Double)
 
 reportTime :: SW.Watches Nanos Nanos -> IO ()
 reportTime w = do
   let laps = SW.allLaps w
   Map.toList laps
-    & map (\(label, ts) ->
-      let sorted = List.sort ts
-          p50 = sorted !! (length sorted `div` 2)
-       in (label, p50))
+    & map
+      ( \(label, ts) ->
+          let sorted = List.sort ts
+              p50 = sorted !! (length sorted `div` 2)
+           in (label, p50)
+      )
     & map (\(label, p50) -> printf "  %-12s %s\n" label (fmtTime p50))
     & sequence_
 
@@ -79,11 +80,13 @@ reportBoth :: SW.Watches (Nanos, Bytes) (Nanos, Bytes) -> IO ()
 reportBoth w = do
   let laps = SW.allLaps w
   Map.toList laps
-    & map (\(label, ts) ->
-      let sorted = List.sort ts
-          p50 = sorted !! (length sorted `div` 2)
-          (t, b) = p50
-       in (label, t, b))
+    & map
+      ( \(label, ts) ->
+          let sorted = List.sort ts
+              p50 = sorted !! (length sorted `div` 2)
+              (t, b) = p50
+           in (label, t, b)
+      )
     & map (\(label, t, b) -> printf "  %-12s %-10s  %s\n" label (fmtTime t) (fmtBytes b))
     & sequence_
 
@@ -104,19 +107,19 @@ main = do
   putStrLn "  --------      ----"
 
   putStrLn "--- drop: create thunk, never force ---"
-  (_, w1) <- runKleisli (run dropPipeline) ()
+  (_, w1) <- runK (eval dropPipeline) ()
   reportTime w1
 
   putStrLn "--- WHNF: force spine, drop elements ---"
-  (_, w2) <- runKleisli (run whnfPipeline) ()
+  (_, w2) <- runK (eval whnfPipeline) ()
   reportTime w2
 
   putStrLn "--- count: count spine only ---"
-  (_, w3) <- runKleisli (run countPipeline) ()
+  (_, w3) <- runK (eval countPipeline) ()
   reportTime w3
 
   putStrLn "--- sum: force every element ---"
-  (_, w4) <- runKleisli (run sumPipeline) ()
+  (_, w4) <- runK (eval sumPipeline) ()
   reportTime w4
 
   -- ==== Time + space pipelines ====
@@ -128,19 +131,19 @@ main = do
   putStrLn "  --------      ----        ---------"
 
   putStrLn "--- drop: create thunk, never force ---"
-  (_, w5) <- runKleisli (run dropPipelineTS) ()
+  (_, w5) <- runK (eval dropPipelineTS) ()
   reportBoth w5
 
   putStrLn "--- WHNF: force spine, drop elements ---"
-  (_, w6) <- runKleisli (run whnfPipelineTS) ()
+  (_, w6) <- runK (eval whnfPipelineTS) ()
   reportBoth w6
 
   putStrLn "--- count: count spine only ---"
-  (_, w7) <- runKleisli (run countPipelineTS) ()
+  (_, w7) <- runK (eval countPipelineTS) ()
   reportBoth w7
 
   putStrLn "--- sum: force every element ---"
-  (_, w8) <- runKleisli (run sumPipelineTS) ()
+  (_, w8) <- runK (eval sumPipelineTS) ()
   reportBoth w8
 
   putStrLn ""
@@ -157,68 +160,68 @@ main = do
 
 -- ==== Time-only pipelines ====
 
-dropPipeline :: Loop (,) (Kleisli IO) () ((), SW.Watches Nanos Nanos)
+dropPipeline :: FreeTrace (,) (K IO) () ((), SW.Watches Nanos Nanos)
 dropPipeline =
   SW.start timeX "total"
-    .> SW.carry (Kleisli (\() -> let _xs = expensive n in pure ()))
+    .> SW.carry (K (\() -> let _xs = expensive n in pure ()))
     .> SW.lap timeX "compute"
-    .> SW.carry (Kleisli (\() -> pure ()))
+    .> SW.carry (K (\() -> pure ()))
     .> SW.stop timeX "total"
 
-whnfPipeline :: Loop (,) (Kleisli IO) () ((), SW.Watches Nanos Nanos)
+whnfPipeline :: FreeTrace (,) (K IO) () ((), SW.Watches Nanos Nanos)
 whnfPipeline =
   SW.start timeX "total"
-    .> SW.carry (Kleisli (\() -> evaluate (whnf (expensive n))))
+    .> SW.carry (K (\() -> evaluate (whnf (expensive n))))
     .> SW.lap timeX "compute"
-    .> SW.carry (Kleisli (\_xs -> pure ()))
+    .> SW.carry (K (\_xs -> pure ()))
     .> SW.stop timeX "total"
 
-countPipeline :: Loop (,) (Kleisli IO) () ((), SW.Watches Nanos Nanos)
+countPipeline :: FreeTrace (,) (K IO) () ((), SW.Watches Nanos Nanos)
 countPipeline =
   SW.start timeX "total"
-    .> SW.carry (Kleisli (\() -> evaluate (count (expensive n))))
+    .> SW.carry (K (\() -> evaluate (count (expensive n))))
     .> SW.lap timeX "compute"
-    .> SW.carry (Kleisli (\_c -> pure ()))
+    .> SW.carry (K (\_c -> pure ()))
     .> SW.stop timeX "total"
 
-sumPipeline :: Loop (,) (Kleisli IO) () ((), SW.Watches Nanos Nanos)
+sumPipeline :: FreeTrace (,) (K IO) () ((), SW.Watches Nanos Nanos)
 sumPipeline =
   SW.start timeX "total"
-    .> SW.carry (Kleisli (\() -> evaluate (total (expensive n))))
+    .> SW.carry (K (\() -> evaluate (total (expensive n))))
     .> SW.lap timeX "compute"
-    .> SW.carry (Kleisli (\_s -> pure ()))
+    .> SW.carry (K (\_s -> pure ()))
     .> SW.stop timeX "total"
 
 -- ==== Time + space pipelines ====
 
-dropPipelineTS :: Loop (,) (Kleisli IO) () ((), SW.Watches (Nanos, Bytes) (Nanos, Bytes))
+dropPipelineTS :: FreeTrace (,) (K IO) () ((), SW.Watches (Nanos, Bytes) (Nanos, Bytes))
 dropPipelineTS =
   SW.start timeSpace "total"
-    .> SW.carry (Kleisli (\() -> let _xs = expensive n in pure ()))
+    .> SW.carry (K (\() -> let _xs = expensive n in pure ()))
     .> SW.lap timeSpace "compute"
-    .> SW.carry (Kleisli (\() -> pure ()))
+    .> SW.carry (K (\() -> pure ()))
     .> SW.stop timeSpace "total"
 
-whnfPipelineTS :: Loop (,) (Kleisli IO) () ((), SW.Watches (Nanos, Bytes) (Nanos, Bytes))
+whnfPipelineTS :: FreeTrace (,) (K IO) () ((), SW.Watches (Nanos, Bytes) (Nanos, Bytes))
 whnfPipelineTS =
   SW.start timeSpace "total"
-    .> SW.carry (Kleisli (\() -> evaluate (whnf (expensive n))))
+    .> SW.carry (K (\() -> evaluate (whnf (expensive n))))
     .> SW.lap timeSpace "compute"
-    .> SW.carry (Kleisli (\_xs -> pure ()))
+    .> SW.carry (K (\_xs -> pure ()))
     .> SW.stop timeSpace "total"
 
-countPipelineTS :: Loop (,) (Kleisli IO) () ((), SW.Watches (Nanos, Bytes) (Nanos, Bytes))
+countPipelineTS :: FreeTrace (,) (K IO) () ((), SW.Watches (Nanos, Bytes) (Nanos, Bytes))
 countPipelineTS =
   SW.start timeSpace "total"
-    .> SW.carry (Kleisli (\() -> evaluate (count (expensive n))))
+    .> SW.carry (K (\() -> evaluate (count (expensive n))))
     .> SW.lap timeSpace "compute"
-    .> SW.carry (Kleisli (\_c -> pure ()))
+    .> SW.carry (K (\_c -> pure ()))
     .> SW.stop timeSpace "total"
 
-sumPipelineTS :: Loop (,) (Kleisli IO) () ((), SW.Watches (Nanos, Bytes) (Nanos, Bytes))
+sumPipelineTS :: FreeTrace (,) (K IO) () ((), SW.Watches (Nanos, Bytes) (Nanos, Bytes))
 sumPipelineTS =
   SW.start timeSpace "total"
-    .> SW.carry (Kleisli (\() -> evaluate (total (expensive n))))
+    .> SW.carry (K (\() -> evaluate (total (expensive n))))
     .> SW.lap timeSpace "compute"
-    .> SW.carry (Kleisli (\_s -> pure ()))
+    .> SW.carry (K (\_s -> pure ()))
     .> SW.stop timeSpace "total"

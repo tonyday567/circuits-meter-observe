@@ -6,18 +6,17 @@
 -- | Active probe: run named measurements against golden baselines.
 module Main where
 
-import Circuit.Category (Category (..), (.>))
-import Circuit.Channel (trace)
-import Circuit.Ends (Ends (..), HasDual (..), In (..), Out (..), close)
-import Circuit.Hyper (HyperF, pattern Hyper, invoke, lift, liftArr, observe, observeArr, push, pushArr, base, baseArr, runHyper)
-import Circuit.Layer (run)
-import Circuit.Loop (Loop (..))
-import Circuit.Net (enrich, melt)
-import Circuit.Process (Process (..), pattern P, scan, fold)
+import Circuit.Category (Category (..), K (..), (.>))
+import Circuit.Hyper (HyperA, baseHyper, baseK, invoke, lift, liftK, observe, observeK, push, pushK, runHyper, pattern Hyper)
+import Circuit.Machine (Body (..), MooreT (..), fold, scan)
 import Circuit.Meter (Meter (..))
 import Circuit.Meter.Stopwatch qualified as SW
 import Circuit.Meter.Time (Nanos, ticks, timeX)
-import Control.Arrow (Kleisli (..), runKleisli)
+import Circuit.Net (Net, melt)
+import Circuit.Syntax (Syntax (Lift), eval)
+import Circuit.Tensor qualified as Tensor
+import Circuit.Trace (FreeTrace)
+import Circuit.Traced (trace)
 import Control.DeepSeq (NFData, force)
 import Control.Exception (IOException, catch, evaluate)
 import Control.Monad (replicateM, replicateM_, void, when)
@@ -25,11 +24,11 @@ import Data.IORef
 import Data.List (foldl', scanl', sort)
 import Data.Map.Strict qualified as Map
 import Options.Applicative
-import Prelude hiding (id, (.))
+import System.Exit (exitFailure)
 import System.IO (Handle, IOMode (ReadMode, WriteMode), hClose, hGetLine, hIsEOF, hPutStrLn, openFile)
 import System.IO.Temp (withSystemTempFile)
-import System.Exit (exitFailure)
 import Text.Printf (printf)
+import Prelude hiding (id, (.))
 
 -- ---------------------------------------------------------------------------
 -- Config
@@ -53,7 +52,10 @@ parseLengths :: Parser [Int]
 parseLengths =
   option
     (eitherReader parseCommaInts)
-    ( long "lengths" <> short 'L' <> value [] <> metavar "INT,INT,..."
+    ( long "lengths"
+        <> short 'L'
+        <> value []
+        <> metavar "INT,INT,..."
         <> help "input sizes for scaling check (e.g. 100,200,500,1000)"
     )
 
@@ -67,7 +69,7 @@ parseCommaInts s =
       (a, []) -> [a]
       (a, _ : rest) -> a : splitOn c rest
 
-readMaybe :: Read a => String -> Maybe a
+readMaybe :: (Read a) => String -> Maybe a
 readMaybe s = case reads s of [(x, "")] -> Just x; _ -> Nothing
 
 parseMode :: Parser Mode
@@ -97,12 +99,13 @@ goldenKey name runs len = name <> ":" <> show runs <> ":" <> show len
 readGolden :: FilePath -> IO (Map.Map String Nanos)
 readGolden path = do
   contents <- readFile path
-  let !m = Map.fromList
-        [ (k, read v)
-        | line <- lines contents,
-          not (null line),
-          let (k, ' ' : v) = break (== ' ') line
-        ]
+  let !m =
+        Map.fromList
+          [ (k, read v)
+          | line <- lines contents,
+            not (null line),
+            let (k, ' ' : v) = break (== ' ') line
+          ]
   evaluate (length m)
   pure m
 
@@ -124,7 +127,7 @@ quantile :: Double -> [Nanos] -> Nanos
 quantile q xs =
   let sorted = sort xs
       idx = floor (q * fromIntegral (length sorted - 1))
-  in sorted !! max 0 (min idx (length sorted - 1))
+   in sorted !! max 0 (min idx (length sorted - 1))
 
 -- | Measure a pure function @runs@ times at length @len@, return quantile.
 -- The function receives the length as its argument.
@@ -137,9 +140,9 @@ measurePure q runs f len = do
 measureIO :: Double -> Int -> IO a -> IO Nanos
 measureIO q runs action = do
   ts <- replicateM runs $ do
-    t0 <- runKleisli (start timeX) ()
+    t0 <- runK (start timeX) ()
     _ <- action
-    dt <- runKleisli (stop timeX) t0
+    dt <- runK (stop timeX) t0
     pure dt
   pure (quantile q ts)
 
@@ -159,7 +162,8 @@ closureApply n = let f x = x + 1 in f n
 
 buildList :: Int -> [Int]
 buildList n = go n []
-  where go 0 acc = acc; go i acc = go (i - 1) (i : acc)
+  where
+    go 0 acc = acc; go i acc = go (i - 1) (i : acc)
 {-# NOINLINE buildList #-}
 
 sumList :: [Int] -> Int
@@ -168,7 +172,8 @@ sumList = foldl' (+) 0
 
 foldSum :: Int -> Int
 foldSum n = go 0 n
-  where go acc 0 = acc; go acc i = go (acc + i) (i - 1)
+  where
+    go acc 0 = acc; go acc i = go (acc + i) (i - 1)
 {-# NOINLINE foldSum #-}
 
 appendList :: [Int] -> [Int]
@@ -177,7 +182,8 @@ appendList xs = xs ++ xs
 
 arithLoop :: Int -> Int
 arithLoop n = go 1 n
-  where go acc 0 = acc; go acc i = go (acc * i) (i - 1)
+  where
+    go acc 0 = acc; go acc i = go (acc * i) (i - 1)
 {-# NOINLINE arithLoop #-}
 
 nub' :: [Int] -> [Int]
@@ -190,17 +196,18 @@ countIORef target = do
   ref <- newIORef (0 :: Int)
   let loop = do
         n <- readIORef ref
-        if n >= target then pure n
-        else writeIORef ref (n + 1) >> loop
+        if n >= target
+          then pure n
+          else writeIORef ref (n + 1) >> loop
   loop
 {-# NOINLINE countIORef #-}
 
 runPipelineStopwatch :: Int -> IO (Int, SW.Watches Nanos Nanos)
-runPipelineStopwatch n = runKleisli (run pipeline) n
+runPipelineStopwatch n = runK (eval pipeline) n
   where
     pipeline =
       SW.start timeX "total"
-        .> SW.carry (Kleisli (\x -> evaluate (force (sum [0 .. x]))))
+        .> SW.carry (K (\x -> evaluate (force (sum [0 .. x]))))
         .> SW.lap timeX "sum"
         .> SW.stop timeX "total"
 
@@ -228,7 +235,7 @@ snippetArith :: Int -> Config -> IO Nanos
 snippetArith len cfg = measurePure (cfgQuantile cfg) (cfgRuns cfg) arithLoop len
 
 snippetNub :: Int -> Config -> IO Nanos
-snippetNub len cfg = measurePure (cfgQuantile cfg) (cfgRuns cfg) (\n -> length (nub' [1..n])) len
+snippetNub len cfg = measurePure (cfgQuantile cfg) (cfgRuns cfg) (\n -> length (nub' [1 .. n])) len
 
 snippetLoop :: Int -> Config -> IO Nanos
 snippetLoop len cfg = measureIO (cfgQuantile cfg) (cfgRuns cfg) (countIORef len)
@@ -250,12 +257,14 @@ snippetBracket _len cfg = measureIO (cfgQuantile cfg) (cfgRuns cfg) (pure ())
 
 sumTail :: (Num a) => [a] -> a
 sumTail = go 0
-  where go acc [] = acc; go acc (x : xs) = go (x + acc) $! xs
+  where
+    go acc [] = acc; go acc (x : xs) = go (x + acc) $! xs
 {-# NOINLINE sumTail #-}
 
 sumTailLazy :: (Num a) => [a] -> a
 sumTailLazy = go 0
-  where go acc [] = acc; go acc (x : xs) = go (x + acc) xs
+  where
+    go acc [] = acc; go acc (x : xs) = go (x + acc) xs
 {-# NOINLINE sumTailLazy #-}
 
 sumCo :: (Num a) => [a] -> a
@@ -283,7 +292,8 @@ sumSum = sum
 
 lengthTail :: [a] -> Int
 lengthTail = go 0
-  where go n [] = n; go n (_ : xs) = go (n + 1) $! xs
+  where
+    go n [] = n; go n (_ : xs) = go (n + 1) $! xs
 {-# NOINLINE lengthTail #-}
 
 lengthFoldr :: [a] -> Int
@@ -298,7 +308,8 @@ lengthPrelude = length
 
 recurseTail :: Int -> Int
 recurseTail n = go 0 n
-  where go acc 0 = acc; go acc i = go (acc + 1) $! (i - 1)
+  where
+    go acc 0 = acc; go acc i = go (acc + 1) $! (i - 1)
 {-# NOINLINE recurseTail #-}
 
 recurseCo :: Int -> Int
@@ -353,16 +364,17 @@ sumTreeEither t = trace (either step step) (t, [], 0)
 -- Calls @observe (lift (+1))@ N times.
 hyperRoundTrip :: Int -> Int
 hyperRoundTrip n = go n 0
-  where go 0 acc = acc; go i acc = go (i - 1) (observe (lift (+1)) acc)
+  where
+    go 0 acc = acc; go i acc = go (i - 1) (observe (lift (+ 1)) acc)
 {-# NOINLINE hyperRoundTrip #-}
 
 -- | Push N functions onto a base Hyper, then observe.
 -- Builds a chain: push f . push g . push h ... . base k
 hyperPushChain :: Int -> Int
-hyperPushChain n = observe (go n (base 0)) n
+hyperPushChain n = observe (go n (baseHyper 0)) n
   where
-    go 0 h = push (+1) h
-    go i h = go (i - 1) (push (+1) h)
+    go 0 h = push (+ 1) h
+    go i h = go (i - 1) (push (+ 1) h)
 {-# NOINLINE hyperPushChain #-}
 
 -- | Compose N hyperfunctions with (.).
@@ -370,15 +382,15 @@ hyperPushChain n = observe (go n (base 0)) n
 hyperCompose :: Int -> Int
 hyperCompose n = observe (go n) 0
   where
-    go 0 = lift (+1)
-    go i = go (i - 1) . lift (+1)
+    go 0 = lift (+ 1)
+    go i = go (i - 1) . lift (+ 1)
 {-# NOINLINE hyperCompose #-}
 
 -- | Build a Hyper via the final encoding and run it through 'invoke' N times.
 -- Each step: @invoke (go i) (go (i-1))@ — feeds one Hyper as continuation to the next.
 -- Measures traversal cost of the nested closure chain without lift/push.
 hyperNest :: Int -> Int
-hyperNest n = go n (lift (+1))
+hyperNest n = go n (lift (+ 1))
   where
     go 0 h = observe h 0
     go i h = go (i - 1) (Hyper $ \k -> invoke h k)
@@ -409,78 +421,81 @@ traceLazyKnot :: Int -> Int
 traceLazyKnot n = head $ drop n (trace step ())
   where
     step :: ([Int], ()) -> ([Int], [Int])
-    step (ns, ()) = (0 : map (+1) ns, ns)
+    step (ns, ()) = (0 : map (+ 1) ns, ns)
 {-# NOINLINE traceLazyKnot #-}
 
 -- | Same lazy list without the trace — direct lazy knot for comparison.
 directKnot :: Int -> Int
 directKnot n = head $ drop n ns
   where
-    ~(ns, _) = (0 : map (+1) ns, ())
+    ~(ns, _) = (0 : map (+ 1) ns, ())
 {-# NOINLINE directKnot #-}
 
--- * Loop — free traced monoidal category
+-- * FreeTrace — free traced monoidal category
 
--- | Lift a plain function into Loop and run it back — round-trip cost.
+-- | Lift a plain function into FreeTrace and run it back — round-trip cost.
 loopLift :: Int -> Int
 loopLift n = go n 0
   where
     go 0 acc = acc
-    go i acc = go (i - 1) (run (Lift (+1) :: Loop (,) (->) Int Int) acc)
+    go i acc = go (i - 1) (eval (Lift (+ 1) :: FreeTrace (,) (->) Int Int) acc)
 {-# NOINLINE loopLift #-}
 
--- | Knot a feedback loop in Loop and run it — the Knot constructor cost.
+-- | Knot a feedback loop in FreeTrace and run it — the trace-node cost.
 -- Uses a productive lazy-list knot like traceLazyKnot.
 loopKnot :: Int -> Int
-loopKnot n = head $ drop n (run knot ())
+loopKnot n = head $ drop n (eval knot ())
   where
     step :: ([Int], ()) -> ([Int], [Int])
-    step (ns, ()) = (0 : map (+1) ns, ns)
-    knot :: Loop (,) (->) () [Int]
-    knot = Knot step
+    step (ns, ()) = (0 : map (+ 1) ns, ns)
+    knot :: FreeTrace (,) (->) () [Int]
+    knot = trace (Lift step)
 {-# NOINLINE loopKnot #-}
 
--- | Compose N Loop Lifts with Category (.) and run.
+-- | Compose N FreeTrace Lifts with Category (.) and run.
 loopCompose :: Int -> Int
-loopCompose n = run (go n :: Loop (,) (->) Int Int) 0
+loopCompose n = eval (go n :: FreeTrace (,) (->) Int Int) 0
   where
-    go :: Int -> Loop (,) (->) Int Int
-    go 0 = Lift (+1)
-    go i = go (i - 1) . Lift (+1)
+    go :: Int -> FreeTrace (,) (->) Int Int
+    go 0 = Lift (+ 1)
+    go i = go (i - 1) . Lift (+ 1)
 {-# NOINLINE loopCompose #-}
 
--- * Net — free traced PROP with bimonoid
+-- * Net — free SMC with bimonoid (no feedback node)
 
--- | Enrich a Loop into Net and melt it back — round-trip cost.
+-- | Melt a Net to FreeTrace and run it — the melt half of the old
+-- enrich/melt round trip. @enrich@, the Loop-to-Net embedding, was
+-- removed along with Net's feedback constructor; current 'Net' values
+-- cannot hold a knot, so the Loop→Net direction is no longer expressible.
 netRoundTrip :: Int -> Int
 netRoundTrip n = go n 0
   where
     go 0 acc = acc
-    go i acc = go (i - 1) (run (melt (enrich (Lift (+1) :: Loop (,) (->) Int Int)) :: Loop (,) (->) Int Int) acc)
+    go i acc = go (i - 1) (eval (melt (Lift (+ 1) :: Net (,) (->) Int Int)) acc)
 {-# NOINLINE netRoundTrip #-}
 
 -- * Layer — free construction interface
 
--- | Compose N morphisms with .> (Layer composition) and run.
+-- | Compose N morphisms with .> (Category composition) and run.
 layerCompose :: Int -> Int
-layerCompose n = run (go n :: Loop (,) (->) Int Int) 0
+layerCompose n = eval (go n :: FreeTrace (,) (->) Int Int) 0
   where
-    go :: Int -> Loop (,) (->) Int Int
-    go 0 = Lift (+1)
-    go i = Lift (+1) .> go (i - 1)
+    go :: Int -> FreeTrace (,) (->) Int Int
+    go 0 = Lift (+ 1)
+    go i = Lift (+ 1) .> go (i - 1)
 {-# NOINLINE layerCompose #-}
 
--- * Process — Moore machine benchmarks
+-- * Machine — Moore machine benchmarks
 
--- | Process sum: P id (+) id — running sum via Moore machine.
--- Compare to scanl'.
+-- | Machine sum: Moore body with inject/step/extract = id/(+)/id —
+-- running sum via Moore machine. Compare to scanl'.
 processScan :: [Int] -> [Int]
-processScan = scan (P id (+) id)
+processScan = scan (MooreT (Body id (uncurry (+)) Tensor.Const))
 {-# NOINLINE processScan #-}
 
--- | Process fold: final value of processScan.
+-- | Machine fold: final value of processScan.
 processFold :: [Int] -> Maybe Int
-processFold = fold (P id (+) id)
+processFold = fold (MooreT (Body id (uncurry (+)) Tensor.Const))
 {-# NOINLINE processFold #-}
 
 -- | Direct scanl' for comparison.
@@ -493,61 +508,40 @@ directFold :: [Int] -> Int
 directFold = foldl' (+) 0
 {-# NOINLINE directFold #-}
 
--- * Ends — channel end benchmarks
+-- * Ends — channel end benchmarks (retired, unfixable)
 
--- | Open a unit Ends pair — the allocation cost.
-endsOpen :: Int -> Int
-endsOpen n = go n 0
-  where
-    go 0 acc = acc
-    go i acc = let _ = open :: Ends (->) () () in go (i - 1) (acc + 1)
-{-# NOINLINE endsOpen #-}
-
--- | Close an Ends pair — the round-trip cost.
-endsClose :: Int -> Int
-endsClose n = go n 0
-  where
-    e = open :: Ends (->) () ()
-    go 0 acc = acc
-    go i acc = close (conjoint e) (companion e) () `seq` go (i - 1) (acc + 1)
-{-# NOINLINE endsClose #-}
-
--- | One-sided emit cost.
-endsEmit :: Int -> Int
-endsEmit n = go n 0
-  where
-    e = open :: Ends (->) () ()
-    go 0 acc = acc
-    go i acc = emit (companion e) (conjoint e) () `seq` go (i - 1) (acc + 1)
-{-# NOINLINE endsEmit #-}
-
--- | One-sided commit cost.
-endsCommit :: Int -> Int
-endsCommit n = go n 0
-  where
-    e = open :: Ends (->) () ()
-    go 0 acc = acc
-    go i acc = commit (conjoint e) (companion e) () `seq` go (i - 1) (acc + 1)
-{-# NOINLINE endsCommit #-}
+-- RETIRED 2026-10-24: the 'Circuit.Ends' API (open/close, companion/conjoint,
+-- emit/commit over polar In/Out ends) was deleted from the substrate in
+-- circuits commit 200da69 ("Split Circuit.Boundary") and has no successor —
+-- nothing in the current substrate expresses channel ends. The four probes
+-- that measured it, and their snippet wrappers, were removed with this note:
+--
+--   endsOpen   — @let _ = open :: Ends (->) () ()@        unit allocation
+--   endsClose  — @close (conjoint e) (companion e) ()@     round-trip cost
+--   endsEmit   — @emit (companion e) (conjoint e) ()@      one-sided emit
+--   endsCommit — @commit (conjoint e) (companion e) ()@    one-sided commit
+--
+-- The 'companion'/'conjoint' names that survive in the substrate belong to
+-- 'Circuit.Span' (graph spans) and mean something else entirely.
 
 -- * Words — resource acquisition and Either loop
 
--- | Write N lines to a temp file, read them back using Loop Either (Kleisli IO),
+-- | Write N lines to a temp file, read them back using FreeTrace Either (K IO),
 -- returning the line count. Measures resource acquisition + effectful loop.
 wordsLoop :: Int -> IO Int
 wordsLoop n = withSystemTempFile "words-bench" $ \fp h -> do
   -- write N lines
   replicateM_ n (hPutStrLn h (show (n :: Int)))
   hClose h
-  -- read them back using the Loop Either pattern
-  (_, acc) <- runKleisli (run pipeline) fp
+  -- read them back using the FreeTrace Either pattern
+  (_, acc) <- runK (eval pipeline) fp
   pure (length acc)
   where
-    openf :: Loop t (Kleisli IO) FilePath Handle
-    openf = Lift (Kleisli (flip openFile ReadMode))
+    openf :: FreeTrace t (K IO) FilePath Handle
+    openf = Lift (K (flip openFile ReadMode))
 
-    readAll :: Loop Either (Kleisli IO) Handle (Handle, [String])
-    readAll = Knot (Kleisli step)
+    readAll :: FreeTrace Either (K IO) Handle (Handle, [String])
+    readAll = trace (Lift (K step))
       where
         step (Left (h, acc)) = do
           done <- hIsEOF h
@@ -558,8 +552,8 @@ wordsLoop n = withSystemTempFile "words-bench" $ \fp h -> do
               pure (Left (h, line : acc))
         step (Right h) = pure (Left (h, []))
 
-    pipeline :: Loop Either (Kleisli IO) FilePath (Handle, [String])
-    pipeline = openf .> readAll .> Lift (Kleisli (\(h, acc) -> hClose h >> pure (h, acc)))
+    pipeline :: FreeTrace Either (K IO) FilePath (Handle, [String])
+    pipeline = openf .> readAll .> Lift (K (\(h, acc) -> hClose h >> pure (h, acc)))
 {-# NOINLINE wordsLoop #-}
 
 -- | Direct IO read for comparison — open, read, close without Loop.
@@ -571,60 +565,61 @@ wordsDirect n = withSystemTempFile "words-direct" $ \fp h -> do
   -- read all lines
   let go acc = do
         done <- hIsEOF h2
-        if done then pure acc
-        else do line <- hGetLine h2; go (line : acc)
+        if done
+          then pure acc
+          else do line <- hGetLine h2; go (line : acc)
   acc <- go []
   hClose h2
   pure (length acc)
 {-# NOINLINE wordsDirect #-}
 
--- * Kleisli IO variants — monadic overhead
+-- * K IO variants — monadic overhead
 
--- | Loop Lift + run in Kleisli IO. Compare to loopLift (pure).
+-- | FreeTrace Lift + run in K IO. Compare to loopLift (pure).
 kLoopLift :: Int -> IO Int
 kLoopLift n = go n 0
   where
     go 0 acc = pure acc
-    go i acc = runKleisli (run (Lift (Kleisli (pure . (+1))) :: Loop (,) (Kleisli IO) Int Int)) acc >>= go (i - 1)
+    go i acc = runK (eval (Lift (K (pure . (+ 1))) :: FreeTrace (,) (K IO) Int Int)) acc >>= go (i - 1)
 {-# NOINLINE kLoopLift #-}
 
--- | Loop Knot + run in Kleisli IO (Either trace). Compare to loopKnot.
+-- | FreeTrace trace + run in K IO (Either trace). Compare to loopKnot.
 kLoopKnot :: Int -> IO Int
 kLoopKnot n = go n 0
   where
     step :: Either (Int, ()) () -> IO (Either (Int, ()) Int)
     step (Right ()) = pure (Left (0, ()))
     step (Left (acc, ())) = pure (Right (acc + 1))
-    knot = Knot (Kleisli step) :: Loop Either (Kleisli IO) () Int
+    knot = trace (Lift (K step)) :: FreeTrace Either (K IO) () Int
     go 0 acc = pure acc
-    go i acc = runKleisli (run knot) () >>= go (i - 1)
+    go i acc = runK (eval knot) () >>= go (i - 1)
 {-# NOINLINE kLoopKnot #-}
 
--- | Hyper push chain in Kleisli IO. Compare to hyperPushChain.
+-- | Hyper push chain in K IO. Compare to hyperPushChain.
 kHyperPush :: Int -> IO Int
 kHyperPush n = do
-  let h = go n (baseArr (0 :: Int)) :: HyperF (Kleisli IO) Int Int
-  observeArr h n
+  let h = go n (baseK (0 :: Int)) :: HyperA (K IO) Int Int
+  observeK h n
   where
-    go 0 h = pushArr (Kleisli (pure . (+1))) h
-    go i h = go (i - 1) (pushArr (Kleisli (pure . (+1))) h)
+    go 0 h = pushK (K (pure . (+ 1))) h
+    go i h = go (i - 1) (pushK (K (pure . (+ 1))) h)
 {-# NOINLINE kHyperPush #-}
 
--- | Hyper compose in Kleisli IO. Compare to hyperCompose.
+-- | Hyper compose in K IO. Compare to hyperCompose.
 kHyperCompose :: Int -> IO Int
 kHyperCompose n = do
-  let h = go n :: HyperF (Kleisli IO) Int Int
-  observeArr h 0
+  let h = go n :: HyperA (K IO) Int Int
+  observeK h 0
   where
-    go 0 = liftArr (Kleisli (pure . (+1)))
-    go i = go (i - 1) . liftArr (Kleisli (pure . (+1)))
+    go 0 = liftK (K (pure . (+ 1)))
+    go i = go (i - 1) . liftK (K (pure . (+ 1)))
 {-# NOINLINE kHyperCompose #-}
 
 -- | Direct Kleisli loop — manual bind, no circuits machinery.
 kDirect :: Int -> IO Int
 kDirect n = go n 0
   where
-    step = pure . (+1)
+    step = pure . (+ 1)
     go 0 acc = pure acc
     go i acc = step acc >>= go (i - 1)
 {-# NOINLINE kDirect #-}
@@ -731,19 +726,8 @@ snippetDirectScan len cfg = measurePure (cfgQuantile cfg) (cfgRuns cfg) (last . 
 snippetDirectFold :: Int -> Config -> IO Nanos
 snippetDirectFold len cfg = measurePure (cfgQuantile cfg) (cfgRuns cfg) (directFold . buildList) len
 
--- Ends snippets
-
-snippetEndsOpen :: Int -> Config -> IO Nanos
-snippetEndsOpen len cfg = measurePure (cfgQuantile cfg) (cfgRuns cfg) endsOpen len
-
-snippetEndsClose :: Int -> Config -> IO Nanos
-snippetEndsClose len cfg = measurePure (cfgQuantile cfg) (cfgRuns cfg) endsClose len
-
-snippetEndsEmit :: Int -> Config -> IO Nanos
-snippetEndsEmit len cfg = measurePure (cfgQuantile cfg) (cfgRuns cfg) endsEmit len
-
-snippetEndsCommit :: Int -> Config -> IO Nanos
-snippetEndsCommit len cfg = measurePure (cfgQuantile cfg) (cfgRuns cfg) endsCommit len
+-- Ends snippet wrappers retired with the Ends probes above (2026-10-24):
+-- snippetEndsOpen, snippetEndsClose, snippetEndsEmit, snippetEndsCommit.
 
 -- Words IO snippets (use measureIO for effectful benchmarks)
 
@@ -828,9 +812,9 @@ scalingSummary pts =
       mx = maximum vals
       spread = if mn > 0 then (mx - mn) / mn else 0
       avg = sum vals / fromIntegral (length vals)
-  in if length vals < 2
-    then ""
-    else printf "  ns/elem: %.2f–%.2f (avg %.2f, spread %.0f%%)" mn mx avg (spread * 100)
+   in if length vals < 2
+        then ""
+        else printf "  ns/elem: %.2f–%.2f (avg %.2f, spread %.0f%%)" mn mx avg (spread * 100)
 
 -- ---------------------------------------------------------------------------
 -- Run
@@ -849,33 +833,36 @@ runCheck cfg sn = do
   printf "  %-8s %10s\n" ("length" :: String) ("time" :: String)
   printf "  %-8s %10s\n" ("------" :: String) ("----" :: String)
 
-  results <- mapM (\len -> do
-    let key = goldenKey modeName runs len
-    actual <- snMeasure sn len cfg
-    if cfgRecord cfg
-      then do
-        existing <- readGoldenSafe (cfgGolden cfg)
-        let updated = Map.insert key actual existing
-        writeGolden (cfgGolden cfg) updated
-        printf "  %-8d %7s ns  (recorded)\n" len (show actual)
-        pure (len, actual)
-      else do
-        existing <- readGolden (cfgGolden cfg)
-        case Map.lookup key existing of
-          Nothing -> do
-            printf "  %-8d %7s ns  no golden\n" len (show actual)
-            pure (len, actual)
-          Just expected -> do
-            let ratio = fromIntegral actual / fromIntegral expected :: Double
-                change = (ratio - 1) * 100
-                sign = if change >= 0 then "+" else ""
-                status
-                  | ratio > 1 + cfgError cfg = "ERROR"
-                  | ratio > 1 + cfgWarn cfg = "WARNING"
-                  | otherwise = "OK"
-            printf "  %-8d %7s ns  (golden %7s ns, %s%d%%) %s\n" len (show actual) (show expected) sign (round change :: Int) status
-            pure (len, actual)
-    ) lens
+  results <-
+    mapM
+      ( \len -> do
+          let key = goldenKey modeName runs len
+          actual <- snMeasure sn len cfg
+          if cfgRecord cfg
+            then do
+              existing <- readGoldenSafe (cfgGolden cfg)
+              let updated = Map.insert key actual existing
+              writeGolden (cfgGolden cfg) updated
+              printf "  %-8d %7s ns  (recorded)\n" len (show actual)
+              pure (len, actual)
+            else do
+              existing <- readGolden (cfgGolden cfg)
+              case Map.lookup key existing of
+                Nothing -> do
+                  printf "  %-8d %7s ns  no golden\n" len (show actual)
+                  pure (len, actual)
+                Just expected -> do
+                  let ratio = fromIntegral actual / fromIntegral expected :: Double
+                      change = (ratio - 1) * 100
+                      sign = if change >= 0 then "+" else ""
+                      status
+                        | ratio > 1 + cfgError cfg = "ERROR"
+                        | ratio > 1 + cfgWarn cfg = "WARNING"
+                        | otherwise = "OK"
+                  printf "  %-8d %7s ns  (golden %7s ns, %s%d%%) %s\n" len (show actual) (show expected) sign (round change :: Int) status
+                  pure (len, actual)
+      )
+      lens
 
   when (length lens > 1) $ do
     putStrLn ""
