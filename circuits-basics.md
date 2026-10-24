@@ -399,49 +399,6 @@ dominates.
 scan produces a full output list; fold only accumulates the final value.
 The 3 ns difference is list construction overhead.
 
-## Ends — channel ends
-
-### variants
-
-```haskell
-endsOpen   n = N allocations of open :: Ends (->) () ()
-endsClose  n = N calls to close (conjoint e) (companion e) ()
-endsEmit   n = N calls to emit (companion e) (conjoint e) ()
-endsCommit n = N calls to commit (conjoint e) (companion e) ()
-```
-
-All use unit ends `open :: Ends (->) () ()` which satisfy
-`close (conjoint e) (companion e) = id` (yanking).
-
-### scaling data
-
-| length | endsOpen | endsClose | endsEmit | endsCommit |
-|--------|---------|----------|----------|-----------|
-| 100    | 1.3     | 2.9      | 1.3      | 2.9       |
-| 500    | 0.8     | 2.4      | 0.8      | 2.3       |
-| 1000   | 0.8     | 2.3      | 0.8      | 2.3       |
-| 5000   | 0.7     | 2.2      | 0.7      | 2.1       |
-
-All p50, 50 runs. ns/elem = total ÷ n.
-
-### findings
-
-**Open is free.** At ~0.9 ns, allocating a unit Ends pair is at the noise
-floor. The `HasUnit () (->)` instance constructs two trivial closures.
-
-**Emit is free; commit costs ~2.5 ns.** `emit` is rank-2 but resolves to a
-known `In` at the call site — GHC eliminates the indirection. `commit`
-carries the actual function application cost. The asymmetry reflects the
-polarity: Out produces, In consumes.
-
-**Close costs ~2.5 ns.** The full `close (conjoint e) (companion e) ()`
-round-trip is the commit of the Out through the In — same as the commit
-cost alone, since emit is zero-cost.
-
-**One-sided channel ends are viable.** Peeling off just an `Out` or `In`
-and using it independently adds ~0-2.5 ns overhead over direct function
-application. The channel abstraction is essentially free in `(->)`.
-
 ## consolidated cost model
 
 | component | operation | ns/call | vs direct |
@@ -462,10 +419,6 @@ application. The channel abstraction is essentially free in `(->)`.
 | Layer | compose (.>) | 33 | 47× |
 | Process | scan (vs scanl') | 1-4 | 1.5–6× |
 | Process | fold (vs foldl') | ~4 | ~1.7× |
-| Ends | open | 0.9 | 1.3× |
-| Ends | close | 2.5 | 3.6× |
-| Ends | emit (one-sided) | 0.8 | 1.1× |
-| Ends | commit (one-sided) | 2.4 | 3.4× |
 
 ## Words — resource acquisition + Either loop
 
@@ -567,10 +520,6 @@ is irrelevant — the monadic overhead is dwarfed by syscalls.
 | Layer | compose (.>) | 33 | 47× |
 | Process | scan (vs scanl') | 1-4 | 1.5–6× |
 | Process | fold (vs foldl') | ~4 | ~1.7× |
-| Ends | open | 0.9 | 1.3× |
-| Ends | close | 2.5 | 3.6× |
-| Ends | emit (one-sided) | 0.8 | 1.1× |
-| Ends | commit (one-sided) | 2.4 | 3.4× |
 | Kleisli | Knot Either trace | 26 | 37× |
 | Kleisli | Hyper compose | 90 | 129× |
 | Words IO | Loop Either pipeline | 360-1900 | I/O-bound |

@@ -463,10 +463,7 @@ loopCompose n = eval (go n :: FreeTrace (,) (->) Int Int) 0
 
 -- * Net — free SMC with bimonoid (no feedback node)
 
--- | Melt a Net to FreeTrace and run it — the melt half of the old
--- enrich/melt round trip. @enrich@, the Loop-to-Net embedding, was
--- removed along with Net's feedback constructor; current 'Net' values
--- cannot hold a knot, so the Loop→Net direction is no longer expressible.
+-- | Melt a Net to FreeTrace and run it.
 netRoundTrip :: Int -> Int
 netRoundTrip n = go n 0
   where
@@ -507,22 +504,6 @@ directScan = scanl' (+) 0
 directFold :: [Int] -> Int
 directFold = foldl' (+) 0
 {-# NOINLINE directFold #-}
-
--- * Ends — channel end benchmarks (retired, unfixable)
-
--- RETIRED 2026-10-24: the 'Circuit.Ends' API (open/close, companion/conjoint,
--- emit/commit over polar In/Out ends) was deleted from the substrate in
--- circuits commit 200da69 ("Split Circuit.Boundary") and has no successor —
--- nothing in the current substrate expresses channel ends. The four probes
--- that measured it, and their snippet wrappers, were removed with this note:
---
---   endsOpen   — @let _ = open :: Ends (->) () ()@        unit allocation
---   endsClose  — @close (conjoint e) (companion e) ()@     round-trip cost
---   endsEmit   — @emit (companion e) (conjoint e) ()@      one-sided emit
---   endsCommit — @commit (conjoint e) (companion e) ()@    one-sided commit
---
--- The 'companion'/'conjoint' names that survive in the substrate belong to
--- 'Circuit.Span' (graph spans) and mean something else entirely.
 
 -- * Words — resource acquisition and Either loop
 
