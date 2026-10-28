@@ -137,13 +137,13 @@ benchTrace cfg = do
 -- Benchmark 4: meterA on the trace loop
 -- ---------------------------------------------------------------------------
 
--- | The trace loop wrapped in a 'Meter'. 'meterAction timeX' builds a
--- circuit that meters each call; 'timesK' iterates it via 'reifyC'.
+-- | The trace loop wrapped in a 'Meter'. The inner 'meterAction timeX'
+-- measures each call; 'timesK' adds the outer repeated-measurement bracket.
 benchMeterK :: Config -> IO [Nanos]
 benchMeterK cfg = do
   let target = cfgTraceTarget cfg
       n = cfgRuns cfg
-      kaction = K (\() -> runTrace target)
+      kaction = reifyC (meterAction timeX (K (\() -> runTrace target)))
   (ts, _r) <- runK (timesK 0 n timeX kaction) ()
   pure ts
 
@@ -210,7 +210,7 @@ main = do
   putStrLn ""
 
   -- simultaneous time + space (single shot, not repeated)
-  putStrLn "5. both timeX + allocX (single shot)"
+  putStrLn "5. both timeX + allocX (single shot; raw RTS counter delta, no GC forced)"
   benchBoth cfg
   putStrLn ""
 

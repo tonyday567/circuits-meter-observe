@@ -111,6 +111,13 @@ cabal run probe -- --snippet fold --runs 100 --quantile 0.1 --length 10000
 cabal run probe -- --snippet bracket --runs 100 --length 1
 ```
 
+Golden keys are exact `snippet:runs:length` triples. Every registered subject
+has recorded 50-run coverage at lengths 100, 500, 1000, and 5000; component
+subjects also retain their historical keys, and `id:3:100` covers the
+friction-card smoke command. Other configurations report `no golden` until
+recorded. All non-Ends subjects in `circuits-basics.md` are live; the Ends
+probes were deliberately retired in `d25ff85`.
+
 ## recursion catalog
 
 The probe includes a catalog of recursion patterns ported from Perf.Algos
@@ -176,20 +183,24 @@ decrement, compare-zero, jump. No allocation, no stack, unboxed Int#.
 
 ### allocation metering
 
-The thunk-buildup case (`sumTailLazy`) exposes the limits of GHC's
-`allocated_bytes` counter:
+The thunk-buildup case (`sumTailLazy`) exposes the sampling contracts of GHC's
+`allocated_bytes` counter. These are the historical figures, retained with
+their channel names corrected:
 
 | method | time | alloc | note |
 |--------|------|-------|------|
-| allocX (no GC) | 14 ms | 8.3 MB | counter captured via natural GCs — correct |
-| allocGC (GC both ends) | 3.9 ms | 2.3 KB | stop GC freed thunks before measurement — wrong |
-| GC-start + allocX | 2.4 µs | 0 B | nursery fit, counter didn't advance — wrong |
+| allocX (no GC) | 14 ms | 8.3 MB | raw counter delta; natural GCs made allocation visible |
+| allocGC (GC both ends) | 3.9 ms | 2.3 KB | post-GC counter delta; not an accurate workload total |
+| GC-start + allocX | 2.4 µs | 0 B | raw counter delta with no final refresh; recent allocation is invisible |
 
-`allocX` works when the computation triggers GCs (as 100k element lists do).
-For small allocations, neither meter works well. The `allocated_bytes`
-counter measures heap *growth*, not total allocation — ephemeral allocations
-that are GC'd within the interval are invisible.
+`allocated_bytes` is the RTS cumulative total-bytes-allocated counter as
+exposed at statistics updates, not heap growth. Both meters subtract two
+samples. `allocX` samples directly, so its delta can omit allocation since the
+previous update. `allocGC` calls `performGC` before each sample, giving a delta
+between refreshed post-GC views while adding GC and instrumentation effects to
+the interval. Neither delta is a guaranteed total for the payload. The three
+runs above also reuse the same input, so they are not independent workload
+measurements.
 
-Three instruments: timer (p50), Core (loop shape), space meter (allocX for
-large allocations, allocGC for per-stage relative comparisons). None is
-sufficient alone.
+Three instruments: timer (p50), Core (loop shape), space meter (counter deltas
+with the sampling boundary stated). None is sufficient alone.

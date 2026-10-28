@@ -4,6 +4,19 @@ Benchmarks of `circuits` library components. All measurements: p50 quantile,
 50 runs unless noted, Apple M4 Pro, GHC 9.14.1, `circuits-meter` bracket
 (42 ns overhead).
 
+## probe registry
+
+Every non-Ends subject below is live and registered in `probe --list`; the
+golden file carries their historical component measurements. Ground-floor and
+recursion subjects use the same 50-run length keys, with `id:3:100` retained
+for the friction-card smoke command. A different run count or length has no
+golden until it is explicitly recorded.
+
+The four Ends probes were deliberately retired with the substrate API in
+`d25ff85`; they are not missing live subjects. The other component subjects
+were present in `Probe.hs`, the goldens, and these notes from the initial
+commit, but had never been added to the registry.
+
 ## tree traversal — stack thunks vs heap continuation
 
 Three ways to sum a binary tree. "Length" is tree depth; a left-spine tree

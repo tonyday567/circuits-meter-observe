@@ -49,6 +49,8 @@ measure label build runF sizes = do
 
 main :: IO ()
 main = do
+  putStrLn "allocation: allocGC delta of RTS allocated_bytes after GC at both ends"
+  putStrLn "not a guaranteed total for the metered payload; +RTS -T required"
   let sizes = [100, 500, 1000, 5000, 10000]
 
   measure "Loop compose" loopChain (`eval` 0) sizes

@@ -12,6 +12,7 @@
 module Main where
 
 import Circuit.Meter.Time (ticks)
+import Control.DeepSeq (force)
 import Data.List (group, nub, sort)
 import Data.List qualified as List
 import Data.Set qualified as Set
@@ -72,10 +73,12 @@ mkList n = [1 .. n]
 -- ---------------------------------------------------------------------------
 
 -- | p50 (median) nanoseconds for @runs@ timings of @f@ on @[1..n]@.
+-- 'force' gives the list result an NF boundary inside the timed bracket;
+-- plain 'ticks' would otherwise stop at the first list constructor.
 p50Of :: Int -> ([Int] -> [Int]) -> Int -> IO Integer
 p50Of runs f n = do
   let !xs = mkList n
-  (ts, _) <- ticks runs f xs
+  (ts, _) <- ticks runs (force . f) xs
   let sorted = List.sort ts
   pure (sorted !! (length sorted `div` 2))
 

@@ -47,7 +47,8 @@ total :: [Int] -> Int
 total = foldr (+) 0
 {-# NOINLINE total #-}
 
--- Meter that carries both time and allocation (GC-forced accuracy).
+-- Meter that carries time and the delta between post-GC samples of the RTS
+-- cumulative allocated_bytes counter.
 timeSpace :: Meter (K IO) (Nanos, Bytes) (Nanos, Bytes)
 timeSpace = both timeX allocGC
 
@@ -97,6 +98,8 @@ main :: IO ()
 main = do
   putStrLn "laziness stopwatch experiment"
   putStrLn $ "  list size: " ++ show n ++ " elements"
+  putStrLn "  allocation: allocGC delta of RTS allocated_bytes after GC at both ends"
+  putStrLn "  not a guaranteed total for the metered payload; +RTS -T required"
   putStrLn ""
 
   -- ==== Time-only pipelines ====
@@ -148,15 +151,11 @@ main = do
 
   putStrLn ""
   putStrLn "interpretation:"
-  putStrLn "  drop:    all cost is allocation (no compute)"
-  putStrLn "  WHNF:    compute appears, allocation near zero"
-  putStrLn "  count:   same pattern as WHNF"
-  putStrLn "  sum:     compute increases (element evaluation)"
+  putStrLn "  drop leaves the expensive list unevaluated"
+  putStrLn "  WHNF, count, and sum force increasing portions of it"
+  putStrLn "  allocation figures are post-GC counter deltas, not workload totals"
   putStrLn ""
-  putStrLn "The space channel distinguishes allocation from compute."
-  putStrLn "Without it, a 131µs 'drop' looks like a slow path."
-  putStrLn "With it, you see it's pure allocation — the thunk is"
-  putStrLn "created but never forced."
+  putStrLn "The allocation channel does not isolate allocation from compute."
 
 -- ==== Time-only pipelines ====
 

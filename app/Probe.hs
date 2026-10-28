@@ -130,10 +130,11 @@ quantile q xs =
    in sorted !! max 0 (min idx (length sorted - 1))
 
 -- | Measure a pure function @runs@ times at length @len@, return quantile.
--- The function receives the length as its argument.
+-- The function receives the length as its argument. Its result is deep-forced
+-- inside the timed bracket so list-returning subjects perform their full work.
 measurePure :: (NFData b) => Double -> Int -> (Int -> b) -> Int -> IO Nanos
 measurePure q runs f len = do
-  (ts, _) <- ticks runs f len
+  (ts, _) <- ticks runs (force . f) len
   pure (quantile q ts)
 
 -- | Measure an IO action @runs@ times, return quantile.
@@ -777,7 +778,35 @@ snippets =
     -- tree traversal — stack vs heap continuation
     Snippet "sumTreeDirect" "tree sum — non-tail (stack thunks, GC pressure)" snippetSumTreeDirect,
     Snippet "sumTreeStack" "tree sum — explicit heap stack (tail rec)" snippetSumTreeStack,
-    Snippet "sumTreeEither" "tree sum — Either trace (delimited continuation)" snippetSumTreeEither
+    Snippet "sumTreeEither" "tree sum — Either trace (delimited continuation)" snippetSumTreeEither,
+    -- Hyper encoding
+    Snippet "hyperRoundTrip" "Hyper lift + observe round-trip" snippetHyperRoundTrip,
+    Snippet "hyperPushChain" "Hyper push chain" snippetHyperPushChain,
+    Snippet "hyperCompose" "Hyper composition chain" snippetHyperCompose,
+    Snippet "hyperNest" "Hyper invoke-chain nesting" snippetHyperNest,
+    Snippet "hyperRun" "Hyper lazy knot + run" snippetHyperRun,
+    Snippet "directCompose" "direct function composition" snippetDirectCompose,
+    -- traced knots and free constructions
+    Snippet "traceLazyKnot" "Traced (,) lazy knot" snippetTraceLazyKnot,
+    Snippet "directKnot" "direct lazy knot" snippetDirectKnot,
+    Snippet "loopLift" "FreeTrace Lift + eval" snippetLoopLift,
+    Snippet "loopKnot" "FreeTrace trace + eval" snippetLoopKnot,
+    Snippet "loopCompose" "FreeTrace composition chain" snippetLoopCompose,
+    Snippet "netRoundTrip" "Net melt + eval" snippetNetRoundTrip,
+    Snippet "layerCompose" "FreeTrace .> composition chain" snippetLayerCompose,
+    -- Moore machines
+    Snippet "processScan" "Moore scan" snippetProcessScan,
+    Snippet "processFold" "Moore fold" snippetProcessFold,
+    Snippet "directScan" "direct scanl'" snippetDirectScan,
+    Snippet "directFold" "direct foldl'" snippetDirectFold,
+    -- effectful loops
+    Snippet "wordsLoop" "FreeTrace Either file read loop" snippetWordsLoop,
+    Snippet "wordsDirect" "direct file read loop" snippetWordsDirect,
+    Snippet "kLoopLift" "K IO FreeTrace Lift + eval" snippetKLoopLift,
+    Snippet "kLoopKnot" "K IO FreeTrace trace + eval" snippetKLoopKnot,
+    Snippet "kHyperPush" "K IO Hyper push chain" snippetKHyperPush,
+    Snippet "kHyperCompose" "K IO Hyper composition chain" snippetKHyperCompose,
+    Snippet "kDirect" "direct K IO bind loop" snippetKDirect
   ]
 
 -- ---------------------------------------------------------------------------
@@ -859,7 +888,7 @@ main :: IO ()
 main = do
   cfg <- execParser (info (configP <**> helper) (fullDesc <> header "circuits-meter probe"))
 
-  when (null (cfgLengths cfg)) $ do
+  when (null (cfgLengths cfg) && cfgMode cfg /= ModeList) $ do
     putStrLn "error: no length specified (use --length or --lengths)"
     exitFailure
 
