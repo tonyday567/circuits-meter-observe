@@ -46,6 +46,7 @@ meterPipeline = runK (eval pipeline)
         .> carry stageB
         .> lap timeX "stageB"
         .> carry stageC
+        .> lap timeX "stageC"
         .> stop timeX "total"
 
 -- ---------------------------------------------------------------------------

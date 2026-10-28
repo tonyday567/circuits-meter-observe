@@ -111,6 +111,7 @@ wordPipeline =
     .> carry post
     .> lap timeX "closed"
     .> carryT (formatfForced :: FreeTrace (,) (K IO) (Map String Int) String)
+    .> lap timeX "format"
     .> stop timeX "total"
 
 -- | Run the pipeline and print the word table plus the timing log.

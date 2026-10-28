@@ -166,6 +166,7 @@ dropPipeline =
     .> SW.carry (K (\() -> let _xs = expensive n in pure ()))
     .> SW.lap timeX "compute"
     .> SW.carry (K (\() -> pure ()))
+    .> SW.lap timeX "tail"
     .> SW.stop timeX "total"
 
 whnfPipeline :: FreeTrace (,) (K IO) () ((), SW.Watches Nanos Nanos)
@@ -174,6 +175,7 @@ whnfPipeline =
     .> SW.carry (K (\() -> evaluate (whnf (expensive n))))
     .> SW.lap timeX "compute"
     .> SW.carry (K (\_xs -> pure ()))
+    .> SW.lap timeX "tail"
     .> SW.stop timeX "total"
 
 countPipeline :: FreeTrace (,) (K IO) () ((), SW.Watches Nanos Nanos)
@@ -182,6 +184,7 @@ countPipeline =
     .> SW.carry (K (\() -> evaluate (count (expensive n))))
     .> SW.lap timeX "compute"
     .> SW.carry (K (\_c -> pure ()))
+    .> SW.lap timeX "tail"
     .> SW.stop timeX "total"
 
 sumPipeline :: FreeTrace (,) (K IO) () ((), SW.Watches Nanos Nanos)
@@ -190,6 +193,7 @@ sumPipeline =
     .> SW.carry (K (\() -> evaluate (total (expensive n))))
     .> SW.lap timeX "compute"
     .> SW.carry (K (\_s -> pure ()))
+    .> SW.lap timeX "tail"
     .> SW.stop timeX "total"
 
 -- ==== Time + space pipelines ====
@@ -200,6 +204,7 @@ dropPipelineTS =
     .> SW.carry (K (\() -> let _xs = expensive n in pure ()))
     .> SW.lap timeSpace "compute"
     .> SW.carry (K (\() -> pure ()))
+    .> SW.lap timeSpace "tail"
     .> SW.stop timeSpace "total"
 
 whnfPipelineTS :: FreeTrace (,) (K IO) () ((), SW.Watches (Nanos, Bytes) (Nanos, Bytes))
@@ -208,6 +213,7 @@ whnfPipelineTS =
     .> SW.carry (K (\() -> evaluate (whnf (expensive n))))
     .> SW.lap timeSpace "compute"
     .> SW.carry (K (\_xs -> pure ()))
+    .> SW.lap timeSpace "tail"
     .> SW.stop timeSpace "total"
 
 countPipelineTS :: FreeTrace (,) (K IO) () ((), SW.Watches (Nanos, Bytes) (Nanos, Bytes))
@@ -216,6 +222,7 @@ countPipelineTS =
     .> SW.carry (K (\() -> evaluate (count (expensive n))))
     .> SW.lap timeSpace "compute"
     .> SW.carry (K (\_c -> pure ()))
+    .> SW.lap timeSpace "tail"
     .> SW.stop timeSpace "total"
 
 sumPipelineTS :: FreeTrace (,) (K IO) () ((), SW.Watches (Nanos, Bytes) (Nanos, Bytes))
@@ -224,4 +231,5 @@ sumPipelineTS =
     .> SW.carry (K (\() -> evaluate (total (expensive n))))
     .> SW.lap timeSpace "compute"
     .> SW.carry (K (\_s -> pure ()))
+    .> SW.lap timeSpace "tail"
     .> SW.stop timeSpace "total"
