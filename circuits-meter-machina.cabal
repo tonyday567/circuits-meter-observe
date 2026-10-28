@@ -155,6 +155,20 @@ executable word
     -Wcompat
     -rtsopts
 
+executable knot-demo
+  main-is: KnotDemo.hs
+  hs-source-dirs: app
+  build-depends:
+    base >=4.20 && <5,
+    circuits >=0.1 && <0.5,
+    circuits-meter >=0.1 && <0.2,
+
+  default-language: GHC2024
+  ghc-options:
+    -Wall
+    -Wcompat
+    -rtsopts
+
 executable producer-consumer
   main-is: producer-consumer.hs
   hs-source-dirs: examples
