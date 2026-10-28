@@ -2,9 +2,10 @@
 
 -- | Laziness stopwatch experiment.
 --
--- Demonstrates lazy / WHNF / NF evaluation with both time and allocation
--- metering. Two meters run side-by-side: timeX and allocX. The space
--- channel reveals whether cost is compute or allocation.
+-- Demonstrates lazy, WHNF, and NF evaluation with time and allocation metering.
+-- Time rows locate forcing boundaries. Allocation rows report deltas between
+-- post-GC samples of the RTS cumulative @allocated_bytes@ counter; sharing,
+-- instrumentation, and work outside each interval affect those deltas.
 --
 -- Run: cabal run laziness
 module Main where
